@@ -43,6 +43,72 @@
 
 python package to clip a GTFS feed to routes serving a boundary file
 
+
+# GTFS Spatial Subsetter
+
+A small command-line tool that selects trips through stops intersecting a polygon or bounding box, then retains every selected trip in full. It never clips stop times or shapes at the boundary.
+
+## Install
+
+Use Python 3.11 or later:
+
+```cmd
+python -m venv .venv
+.venv\Scripts\activate
+python -m pip install -e ".[dev]"
+```
+
+## Use
+
+Polygon input:
+
+```cmd
+python subset_gtfs.py ^
+  --input "E:\GTFS\north_west.zip" ^
+  --boundary "E:\Boundaries\greater_manchester.gpkg" ^
+  --output "E:\GTFS\greater_manchester.zip" ^
+  --buffer-m 250 ^
+  --report "E:\GTFS\greater_manchester_report.json"
+```
+
+Bounding box input uses `MIN_X MIN_Y MAX_X MAX_Y`. Its CRS is mandatory:
+
+```cmd
+python subset_gtfs.py ^
+  --input "E:\GTFS\north_west.zip" ^
+  --bbox -2.75 53.30 -1.90 53.70 ^
+  --bbox-crs EPSG:4326 ^
+  --output "E:\GTFS\greater_manchester.zip" ^
+  --no-buffer
+```
+
+All boundaries are transformed to EPSG:27700 for the metre buffer and then to EPSG:4326 for stop intersection. `--no-buffer` takes precedence over `--buffer-m`.
+
+## Behaviour and assumptions
+
+- All source `.txt` tables are read as strings with empty strings preserved.
+- Stops on the boundary qualify because selection uses `intersects`.
+- One qualifying stop selects the complete trip, all its stop times, all stops it uses, and its complete shape.
+- Parent-station ancestors and connected pathway endpoints are expanded without automatically retaining siblings.
+- `calendar.txt` and `calendar_dates.txt` are independent; a selected service must occur in at least one.
+- Transfer rows are retained only when every non-empty referenced entity remains.
+- `feed_info.txt` is copied unchanged. Calendar, shape, frequency, agency, level, pathway, transfer and attribution tables are filtered.
+- Fare v1/v2, area/location-group, network, booking-rule and translation tables are deliberately omitted when present. Their cross-table semantics need feed-specific handling; copying them could produce dangling references. Every decision appears in the JSON report.
+- Invalid polygon geometry is repaired with Shapely `make_valid`, logged and reported. Invalid GTFS relationships are not repaired.
+- The output is written to a temporary ZIP and atomically moved into place after validation.
+
+Run an external canonical GTFS validator on the result as a final specification-compliance check.
+
+## Quality checks
+
+```cmd
+python -m pytest
+ruff format --check .
+ruff check .
+```
+
+
+
 > [!TIP]
 > For more detailed information including a user guide, tutorials and API reference see the full
 > [gtfs-clip documentation](https://gtfs-clip.readthedocs.io/en/stable/)
