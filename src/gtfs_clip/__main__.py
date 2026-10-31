@@ -593,6 +593,11 @@ def write_gtfs(tables: dict[str, pd.DataFrame], output: Path) -> None:
     LOGGER.info("Output GTFS written successfully: %s", output)
 
 
+def _source_signature(stat: os.stat_result) -> tuple[int, int, int, int]:
+    """Identify source changes without treating a read's access time as a change."""
+    return stat.st_dev, stat.st_ino, stat.st_size, stat.st_mtime_ns
+
+
 def run(
     input_path: Path,
     output_path: Path,
@@ -641,7 +646,9 @@ def run(
     LOGGER.info("Stage 5/5: Writing output GTFS")
     write_gtfs(filtered, output_path)
 
-    if source_stat and input_resolved.stat() != source_stat:
+    if source_stat and (
+        _source_signature(input_resolved.stat()) != _source_signature(source_stat)
+    ):
         output_resolved.unlink(missing_ok=True)
         raise GTFSError("Source GTFS changed during processing; output was removed.")
 

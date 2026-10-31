@@ -2,6 +2,7 @@ from __future__ import annotations
 
 import hashlib
 import logging
+import os
 import zipfile
 from pathlib import Path
 
@@ -9,7 +10,8 @@ import pandas as pd
 import pytest
 from shapely.geometry import box
 
-from subset_gtfs import (
+import gtfs_clip.__main__ as clip
+from gtfs_clip.__main__ import (
     LOGGER,
     GTFSError,
     configure_logging,
@@ -237,6 +239,51 @@ def test_zip_root_and_source_unchanged(tmp_path: Path) -> None:
     assert digest(source_zip) == before
     with zipfile.ZipFile(output) as archive:
         assert all("/" not in name and "\\" not in name for name in archive.namelist())
+
+
+@pytest.mark.parametrize("change", ["access_time", "content", "same_size_content"])
+def test_source_change_detection(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch, change: str
+) -> None:
+    """Keep the output after reads but reject changes to the source ZIP."""
+    directory = make_feed(tmp_path / "feed")
+    source = tmp_path / "source.zip"
+    with zipfile.ZipFile(source, "w") as archive:
+        for path in directory.glob("*.txt"):
+            archive.write(path, path.name)
+    output = tmp_path / "output.zip"
+    initial_stat = source.stat()
+    write_gtfs = clip.write_gtfs
+
+    def write_then_change_source(tables: dict[str, pd.DataFrame], output_path: Path) -> None:
+        write_gtfs(tables, output_path)
+        if change == "access_time":
+            stat = source.stat()
+            os.utime(source, ns=(initial_stat.st_atime_ns - 10_000_000_000, stat.st_mtime_ns))
+        elif change == "content":
+            with source.open("ab") as handle:
+                handle.write(b"changed")
+        else:
+            stat = source.stat()
+            with source.open("r+b") as handle:
+                handle.write(b"X")
+            os.utime(source, ns=(stat.st_atime_ns, stat.st_mtime_ns + 10_000_000_000))
+
+    monkeypatch.setattr(clip, "write_gtfs", write_then_change_source)
+    if change != "access_time":
+        with pytest.raises(GTFSError, match="Source GTFS changed during processing"):
+            run(
+                source, output, bbox=(-2.3, 53.4, -2.1, 53.6), bbox_crs="EPSG:4326", buffer_m=0
+            )
+        assert not output.exists()
+    else:
+        run(
+            source, output, bbox=(-2.3, 53.4, -2.1, 53.6), bbox_crs="EPSG:4326", buffer_m=0
+        )
+        assert source.stat().st_atime_ns != initial_stat.st_atime_ns
+        assert source.stat().st_mtime_ns == initial_stat.st_mtime_ns
+        with zipfile.ZipFile(output) as archive:
+            assert "stops.txt" in archive.namelist()
 
 
 def test_validation_detects_dangling_reference(tmp_path: Path) -> None:
