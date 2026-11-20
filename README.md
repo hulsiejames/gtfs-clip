@@ -96,6 +96,7 @@ All boundaries are transformed to EPSG:27700 for the metre buffer and then to EP
 - Fare v1/v2, area/location-group, network, booking-rule and translation tables are deliberately omitted when present. Their cross-table semantics need feed-specific handling; copying them could produce dangling references. Every decision appears in the JSON report.
 - Invalid polygon geometry is repaired with Shapely `make_valid`, logged and reported. Invalid GTFS relationships are not repaired.
 - The output is written to a temporary ZIP and atomically moved into place after validation.
+- Source-integrity protection compares input ZIP content hashes, so metadata-only timestamp/access updates do not trigger output removal.
 
 Run an external canonical GTFS validator on the result as a final specification-compliance check.
 
